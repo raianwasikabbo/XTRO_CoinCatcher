@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>XTRO Coin Catcher</title>
+<style>
+*{box-sizing:border-box}
+body{
+margin:0;background:#05080d;color:#fff;font-family:Arial,sans-serif;
+display:flex;justify-content:center;align-items:center;min-height:100vh;
+overflow:hidden
+}
+#game{
+width:min(96vw,520px);background:#0c131d;border:1px solid #26384b;
+border-radius:22px;padding:12px;box-shadow:0 20px 60px #000
+}
+.screen{text-align:center}
+.logo{
+margin:10px auto 4px;width:max-content;padding:10px 18px;
+border:2px solid #1689e8;border-radius:14px;color:#49adff;
+font-size:27px;font-weight:900;letter-spacing:2px;
+box-shadow:0 0 18px #1689e855
+}
+.logo span{display:block;font-size:13px;letter-spacing:5px;color:#fff}
+h2{margin:8px}
+p{color:#aebdcc}
+button{
+border:0;border-radius:13px;background:#243447;color:#fff;
+font-weight:bold;font-size:17px;padding:14px 20px;
+cursor:pointer;-webkit-tap-highlight-color:transparent
+}
+button:active{transform:scale(.95)}
+#startGame{
+background:#1689e8;width:80%;margin:28px auto 18px;
+font-size:20px;padding:17px
+}
+#modeScreen{display:none}
+.modes{
+display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:18px 0
+}
+.modes button{background:#172535}
+.modes button.sel{background:#1689e8}
+#ok{background:#1689e8;width:80%;margin:10px}
+#desc{min-height:20px}
+#playScreen,#gameover{display:none}
+#hud{
+display:flex;justify-content:space-around;padding:7px;font-size:14px
+}
+canvas{
+width:100%;aspect-ratio:3/4;display:block;border-radius:15px;
+background:#08111d;border:1px solid #26384b
+}
+.controls{
+display:flex;gap:10px;margin-top:9px
+}
+.controls button{
+height:62px;flex:1;background:#202f40;
+padding:0;touch-action:none;user-select:none;
+-webkit-user-select:none;position:relative
+}
+
+/* CSS arrows — NOT text */
+#L::after,#R::after{
+content:"";
+position:absolute;
+top:50%;left:50%;
+width:17px;height:17px;
+border-top:4px solid #fff;
+border-left:4px solid #fff;
+}
+#L::after{
+transform:translate(-35%,-50%) rotate(-45deg)
+}
+#R::after{
+transform:translate(-65%,-50%) rotate(135deg)
+}
+
+.big{font-size:36px;color:#49adff;margin:25px 0 8px}
+.small{font-size:13px;color:#718398}
+#gameover button{margin:5px}
+
+@media(max-width:380px){
+#game{padding:9px}
+.logo{font-size:23px}
+#hud{font-size:12px}
+.controls button{height:56px}
+}
+</style>
+</head>
+
+<body>
+<div id="game">
+
+<div id="menu" class="screen">
+<div class="logo">XTRO<span>COIN CATCHER</span></div>
+<p>Catch coins. Build combos. Survive.</p>
+
+<button id="startGame">START GAME</button>
+
+<p class="small">BEST SCORE: <b id="menuBest">0</b></p>
+</div>
+
+<div id="modeScreen" class="screen">
+<div class="logo">XTRO<span>COIN CATCHER</span></div>
+<h2>SELECT MODE</h2>
+
+<div class="modes">
+<button id="easy" class="sel" onclick="mode('easy')">EASY</button>
+<button id="medium" onclick="mode('medium')">MEDIUM</button>
+<button id="hard" onclick="mode('hard')">HARD</button>
+<button id="hacker" onclick="mode('hacker')">HACKER</button>
+</div>
+
+<p id="desc">Lots of coins. Slow speed.</p>
+
+<button id="ok">OK</button>
+</div>
+
+<div id="playScreen">
+
+<div id="hud">
+<span>SCORE <b id="score">0</b></span>
+<span>COMBO x<b id="combo">1</b></span>
+<span>LIVES <b id="lives">3</b></span>
+<span>BEST <b id="best">0</b></span>
+</div>
+
+<canvas id="c" width="540" height="720"></canvas>
+
+<div class="controls">
+<button id="L" aria-label="Move left"></button>
+<button id="R" aria-label="Move right"></button>
+</div>
+
+</div>
+
+<div id="gameover" class="screen">
+<div class="big">GAME OVER</div>
+<p>SCORE</p>
+<h2 id="final">0</h2>
+<p>BEST SCORE: <b id="finalBest">0</b></p>
+<button onclick="start()">PLAY AGAIN</button>
+<button onclick="home()">MENU</button>
+</div>
+
+</div>
+
+<script>
+const canvas=document.getElementById("c");
+const ctx=canvas.getContext("2d");
+const W=540,H=720;
+
+let player,objects,particles,score,lives,combo,best;
+let running=false,left=false,right=false,last,spawn=0;
+let difficulty="easy";
+
+const settings={
+easy:{
+interval:23,
+speed:2.5,
+bomb:.035,
+gold:.13,
+gem:.06,
+glitch:0
+},
+medium:{
+interval:38,
+speed:4.3,
+bomb:.09,
+gold:.12,
+gem:.06,
+glitch:0
+},
+hard:{
+interval:58,
+speed:6.2,
+bomb:.15,
+gold:.10,
+gem:.05,
+glitch:0
+},
+hacker:{
+interval:75,
+speed:8.5,
+bomb:.18,
+gold:.08,
+gem:.04,
+glitch:.40
+}
+};
+
+best=+(localStorage.xtroCoinBest||0);
+document.getElementById("menuBest").textContent=best;
+document.getElementById("best").textContent=best;
+
+function mode(m){
+difficulty=m;
+
+document.querySelectorAll(".modes button")
+.forEach(b=>b.classList.remove("sel"));
+
+document.getElementById(m).classList.add("sel");
+
+let text={
+easy:"Lots of coins. Slow speed.",
+medium:"Fewer coins. Faster speed.",
+hard:"Very few coins. Very fast.",
+hacker:"Extremely few coins. Extreme speed. Expect bugs."
+};
+
+document.getElementById("desc").textContent=text[m];
+}
+
+function home(){
+running=false;
+document.getElementById("menu").style.display="block";
+document.getElementById("modeScreen").style.display="none";
+document.getElementById("playScreen").style.display="none";
+document.getElementById("gameover").style.display="none";
+document.getElementById("menuBest").textContent=best;
+}
+
+document.getElementById("startGame").onclick=()=>{
+document.getElementById("menu").style.display="none";
+document.getElementById("modeScreen").style.display="block";
+};
+
+document.getElementById("ok").onclick=start;
+
+function start(){
+document.getElementById("menu").style.display="none";
+document.getElementById("modeScreen").style.display="none";
+document.getElementById("gameover").style.display="none";
+document.getElementById("playScreen").style.display="block";
+
+player={x:240,y:640,w:60,h:25};
+objects=[];
+particles=[];
+score=0;
+lives=3;
+combo=1;
+spawn=0;
+running=true;
+last=performance.now();
+
+document.getElementById("score").textContent=0;
+document.getElementById("lives").textContent=3;
+document.getElementById("combo").textContent=1;
+document.getElementById("best").textContent=best;
+
+requestAnimationFrame(loop);
+}
+
+function makeObject(){
+let s=settings[difficulty];
+let r=Math.random(),type="coin";
+
+if(r<s.bomb)type="bomb";
+else if(r<s.bomb+s.gold)type="gold";
+else if(r<s.bomb+s.gold+s.gem)type="gem";
+
+objects.push({
+x:25+Math.random()*(W-50),
+y:-35,
+r:type==="gem"?15:type==="gold"?18:14,
+type:type,
+vy:s.speed+Math.random()*s.speed*.55+score*.003,
+rot:Math.random()*6
+});
+}
+
+function particle(x,y,n){
+for(let i=0;i<n;i++)
+particles.push({
+x:x,y:y,
+vx:(Math.random()-.5)*7,
+vy:(Math.random()-.5)*7,
+life:25+Math.random()*20,
+s:2+Math.random()*4
+});
+}
+
+function background(){
+let g=ctx.createLinearGradient(0,0,0,H);
+g.addColorStop(0,"#071b30");
+g.addColorStop(1,"#081018");
+ctx.fillStyle=g;
+ctx.fillRect(0,0,W,H);
+
+ctx.fillStyle="#0c263b";
+
+for(let i=0;i<10;i++){
+let x=i*60,h=70+(i%4)*30;
+ctx.fillRect(x,H-65-h,45,h);
+}
+
+ctx.strokeStyle="#173047";
+
+for(let y=50;y<H;y+=50){
+ctx.beginPath();
+ctx.moveTo(0,y);
+ctx.lineTo(W,y);
+ctx.stroke();
+}
+
+ctx.fillStyle="#122638";
+ctx.fillRect(0,H-65,W,65);
+}
+
+function drawPlayer(){
+ctx.save();
+ctx.translate(player.x+30,player.y+12);
+
+ctx.fillStyle="#111";
+ctx.beginPath();
+ctx.arc(-20,15,8,0,7);
+ctx.arc(20,15,8,0,7);
+ctx.fill();
+
+ctx.fillStyle="#42a9ff";
+ctx.fillRect(-30,-12,60,25);
+
+ctx.fillStyle="#9bd8ff";
+ctx.fillRect(-20,-7,40,7);
+
+ctx.fillStyle="#182635";
+ctx.fillRect(-23,3,46,6);
+
+ctx.restore();
+}
+
+function drawObject(o){
+ctx.save();
+ctx.translate(o.x,o.y);
+o.rot+=.04;
+ctx.rotate(o.rot);
+
+if(o.type==="bomb"){
+ctx.fillStyle="#e5394f";
+ctx.beginPath();
+ctx.arc(0,0,o.r,0,7);
+ctx.fill();
+
+ctx.fillStyle="#151515";
+ctx.fillRect(-5,-5,10,10);
+
+ctx.strokeStyle="#ff9c32";
+ctx.lineWidth=4;
+ctx.beginPath();
+ctx.moveTo(7,-10);
+ctx.lineTo(15,-18);
+ctx.stroke();
+}
+else if(o.type==="gold"){
+ctx.fillStyle="#ffd43b";
+ctx.beginPath();
+ctx.arc(0,0,18,0,7);
+ctx.fill();
+
+ctx.fillStyle="#fff0a0";
+ctx.beginPath();
+ctx.arc(0,0,11,0,7);
+ctx.fill();
+}
+else if(o.type==="gem"){
+ctx.fillStyle="#c46cff";
+ctx.beginPath();
+ctx.moveTo(0,-18);
+ctx.lineTo(15,-5);
+ctx.lineTo(8,16);
+ctx.lineTo(-8,16);
+ctx.lineTo(-15,-5);
+ctx.closePath();
+ctx.fill();
+}
+else{
+ctx.fillStyle="#ffc928";
+ctx.beginPath();
+ctx.arc(0,0,14,0,7);
+ctx.fill();
+
+ctx.strokeStyle="#fff1a2";
+ctx.lineWidth=2;
+ctx.stroke();
+}
+
+ctx.restore();
+}
+
+function hit(o){
+return o.x>player.x-10 &&
+o.x<player.x+player.w+10 &&
+o.y+o.r>player.y &&
+o.y-o.r<player.y+player.h;
+}
+
+function loop(t){
+if(!running)return;
+
+let dt=Math.min((t-last)/16.67,2);
+last=t;
+spawn+=dt;
+
+if(left)player.x-=8*dt;
+if(right)player.x+=8*dt;
+
+player.x=Math.max(5,Math.min(W-player.w-5,player.x));
+
+background();
+
+let s=settings[difficulty];
+
+if(spawn>s.interval){
+makeObject();
+spawn=0;
+}
+
+for(let i=objects.length-1;i>=0;i--){
+let o=objects[i];
+
+o.y+=o.vy*dt;
+drawObject(o);
+
+if(hit(o)){
+if(o.type==="bomb"){
+lives--;
+combo=1;
+particle(o.x,o.y,15);
+document.getElementById("lives").textContent=lives;
+document.getElementById("combo").textContent=1;
+}
+else{
+let value=o.type==="gold"?5:
+o.type==="gem"?10:1;
+
+if(Math.random()>s.glitch)
+score+=value*combo;
+
+combo=Math.min(12,combo+(o.type==="gem"?2:1));
+
+particle(o.x,o.y,12);
+
+document.getElementById("score").textContent=score;
+document.getElementById("combo").textContent=combo;
+}
+
+objects.splice(i,1);
+
+if(lives<=0){
+end();
+return;
+}
+
+continue;
+}
+
+if(o.y>H+40){
+if(o.type!=="bomb")combo=1;
+objects.splice(i,1);
+}
+}
+
+drawPlayer();
+
+for(let i=particles.length-1;i>=0;i--){
+let p=particles[i];
+
+p.x+=p.vx*dt;
+p.y+=p.vy*dt;
+p.life-=dt;
+
+ctx.fillStyle="#ffd43b";
+ctx.fillRect(p.x,p.y,p.s,p.s);
+
+if(p.life<=0)particles.splice(i,1);
+}
+
+requestAnimationFrame(loop);
+}
+
+function end(){
+running=false;
+
+if(score>best){
+best=score;
+localStorage.xtroCoinBest=best;
+}
+
+document.getElementById("playScreen").style.display="none";
+document.getElementById("gameover").style.display="block";
+document.getElementById("final").textContent=score;
+document.getElementById("finalBest").textContent=best;
+}
+
+function control(btn,side){
+let down=e=>{
+e.preventDefault();
+if(side==="L")left=true;
+else right=true;
+};
+
+let up=e=>{
+e.preventDefault();
+if(side==="L")left=false;
+else right=false;
+};
+
+btn.addEventListener("pointerdown",down);
+btn.addEventListener("pointerup",up);
+btn.addEventListener("pointercancel",up);
+btn.addEventListener("pointerleave",up);
+}
+
+control(document.getElementById("L"),"L");
+control(document.getElementById("R"),"R");
+
+document.addEventListener("keydown",e=>{
+if(e.key==="ArrowLeft")left=true;
+if(e.key==="ArrowRight")right=true;
+});
+
+document.addEventListener("keyup",e=>{
+if(e.key==="ArrowLeft")left=false;
+if(e.key==="ArrowRight")right=false;
+});
+
+home();
+</script>
+</body>
+</html>
